@@ -1,0 +1,35 @@
+[package]
+name    = "simulate-engine"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "simulate_bench"
+path = "src/bin/simulate_bench.rs"
+
+[dependencies]
+tokio.workspace            = true
+futures.workspace          = true
+revm.workspace             = true
+alloy.workspace            = true
+alloy-primitives.workspace = true
+alloy-provider.workspace   = true
+alloy-rpc-types.workspace  = true
+alloy-rpc-types-eth.workspace = true
+alloy-transport.workspace  = true
+alloy-sol-types.workspace  = true
+alloy-network.workspace    = true
+rayon.workspace            = true
+dashmap.workspace          = true
+parking_lot.workspace      = true
+mimalloc.workspace         = true
+anyhow.workspace           = true
+thiserror.workspace        = true
+tracing.workspace          = true
+tracing-subscriber.workspace = true
+serde.workspace            = true
+serde_json.workspace       = true
+bytes.workspace            = true
+hex.workspace              = true
+dotenv.workspace           = true
+kanal.workspace            = true
