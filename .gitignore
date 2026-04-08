@@ -1,3 +1,4 @@
+.DS_Store
 mev-bot/target/
 mev-bot/.env
 mev-bot/contracts/cache/
