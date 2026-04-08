@@ -1,0 +1,35 @@
+[package]
+name    = "flashbots-executor"
+version = { workspace = true }
+edition = { workspace = true }
+
+[[bin]]
+name = "mempool_watch"
+path = "src/bin/mempool_watch.rs"
+
+[dependencies]
+# workspace
+tokio        = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+alloy        = { workspace = true }
+alloy-primitives = { workspace = true }
+
+# HTTP client for Flashbots relay
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Signing bundles: secp256k1 + keccak
+k256    = { version = "0.13", features = ["ecdsa"] }
+sha3    = "0.10"
+hex     = { workspace = true }
+
+# workspace utils needed by mempool_watch binary
+tracing-subscriber = { workspace = true }
+dotenv             = { workspace = true }
+kanal              = { workspace = true }
+mimalloc           = { workspace = true }
+
+# simulate-engine types
+simulate-engine = { path = "../simulate-engine" }

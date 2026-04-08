@@ -1,0 +1,58 @@
+[workspace]
+members = ["crates/simulate-engine", "crates/flashbots-executor"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version  = "0.1.0"
+
+[workspace.dependencies]
+# Async
+tokio        = { version = "1", features = ["full"] }
+futures      = "0.3"
+async-trait  = "0.1"
+
+# EVM — revm 36 + alloy 1.7.3
+revm         = { version = "36.0.0", default-features = false, features = [
+    "std",
+    "serde",
+    "optional_no_base_fee",
+    "optional_block_gas_limit",
+    "optional_eip3607",
+] }
+alloy        = { version = "1.7.3", features = ["full", "eips", "hyper", "rpc-client", "pubsub"] }
+alloy-primitives   = { version = "1.5.7", features = ["rand"] }
+alloy-provider     = { version = "1.7.3", features = ["reqwest", "pubsub"] }
+alloy-rpc-types    = "1.7.3"
+alloy-rpc-types-eth = "1.7.3"
+alloy-transport    = "1.7.3"
+alloy-sol-types    = "1.5.7"
+alloy-network      = "1.7.3"
+
+# Concurrency
+rayon        = "1.10"
+dashmap      = "6"
+parking_lot  = "0.12"
+
+# Allocator
+mimalloc     = { version = "0.1", default-features = false }
+
+# Utils
+anyhow       = "1"
+thiserror    = "2"
+tracing      = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+bytes        = "1"
+hex          = "0.4"
+dotenv       = "0.15"
+kanal        = "0.1"
+
+[profile.release]
+codegen-units   = 1
+opt-level       = 3
+lto             = "fat"
+overflow-checks = false
+debug           = false
+strip           = "symbols"

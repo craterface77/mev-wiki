@@ -1,0 +1,530 @@
+/// @title  SandwichBot
+/// @notice Gas-optimised sandwich bot contract.
+///         Adapted from rusty-sando/contract/src/sando.huff by 0xmouseless.
+///
+/// ARCHITECTURE
+/// ─────────────
+/// • WETH-based: bot always holds WETH; token_in is WETH for frontrun, token_out for backrun.
+/// • Caller auth: only OWNER (set at deploy) can call front/backrun methods.
+/// • Function dispatch via JUMPDEST encoding — first calldata byte is the jump label.
+///   Saves the 4-byte selector dispatch cost.
+///
+/// METHODS (JUMPDEST index)
+/// ────────────────────────
+///  0x05  v2_backrun0   — V2 backrun,  WETH is token0 (output)
+///  0x0A  v2_frontrun0  — V2 frontrun, WETH is token0 (input)
+///  0x0F  v2_backrun1   — V2 backrun,  WETH is token1 (output)
+///  0x14  v2_frontrun1  — V2 frontrun, WETH is token1 (input)
+///  0x19  v3_backrun0   — V3 backrun,  WETH is token0 (output)
+///  0x1E  v3_frontrun0  — V3 frontrun, WETH is token0 (input)
+///  0x23  v3_backrun1   — V3 backrun,  WETH is token1 (output)
+///  0x28  v3_frontrun1  — V3 frontrun, WETH is token1 (input)
+///  0x2D  recover_weth  — Withdraw WETH to owner
+///  0x32  recover_eth   — Withdraw ETH  to owner
+///  0x37  seppuku       — self-destruct (emergency)
+///  0xFA  (reserved)    — UniswapV3SwapCallback
+///
+/// WETH AMOUNT ENCODING
+/// ─────────────────────
+/// WETH amounts passed via tx.value, divided by 1e5 (100_000).
+/// Decoded in contract: actual_weth = callvalue * 100_000.
+/// Last 5 digits of WETH amount are truncated (acceptable ~1e-13 ETH loss).
+///
+/// OTHER TOKEN AMOUNT ENCODING (5-byte packed)
+/// ─────────────────────────────────────────────
+/// 5 bytes in calldata: [memOffset:1][encodedValue:4]
+/// Decoded: mstore(memOffset, encodedValue << 8*memOffset)
+/// See calldata_builder.rs encode_huff_amount() for details.
+///
+/// CALLDATA FORMAT
+/// ───────────────
+/// V2 frontrun (WETH is token0 input):
+///   [JUMPDEST:1][pairAddress:20][encodedTokenOut:5]
+///
+/// V2 frontrun (WETH is token1 input):
+///   [JUMPDEST:1][pairAddress:20][encodedTokenOut:5]
+///
+/// V2 backrun (WETH is token0 output):
+///   [JUMPDEST:1][pairAddress:20][tokenInAddress:20][encodedAmountIn:5]
+///
+/// V2 backrun (WETH is token1 output):
+///   [JUMPDEST:1][pairAddress:20][tokenInAddress:20][encodedAmountIn:5]
+///
+/// V3 frontrun (WETH is token0 input):
+///   [JUMPDEST:1][pairAddress:20][poolKeyHash:32]
+///
+/// V3 frontrun (WETH is token1 input):
+///   [JUMPDEST:1][pairAddress:20][poolKeyHash:32]
+///
+/// V3 backrun (WETH is token0 output):
+///   [JUMPDEST:1][pairAddress:20][tokenInAddress:20][poolKeyHash:32][encodedAmountIn:5]
+///
+/// V3 backrun (WETH is token1 output):
+///   [JUMPDEST:1][pairAddress:20][tokenInAddress:20][poolKeyHash:32][encodedAmountIn:5]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants — replace OWNER before deploying
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// UniswapV3 factory — for callback msg.sender validation
+#define constant FACTORY = 0x1F98431c8aD98523631AE4a59f267346ea31F984000000000000000000000000
+#define constant PAIR_INIT_CODE_HASH = 0xe34f199b19b2b4f47f68442619d555527d244f78a3297ea89325f843f87b8b54
+
+/// WETH mainnet address
+#define constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2
+
+/// Bot owner — the ONLY address allowed to call sandwich methods.
+/// REPLACE with your EOA or multisig before deploying.
+#define constant OWNER = 0x0000000000000000000000000000000000000000
+
+/// V3 sqrt price limits (no-limit sentinels)
+#define constant MAX_SQRT_PRICE_LIMIT_X96 = 0xFFFD8963EFD1FC6A506488495D951D5263988D25
+#define constant MIN_SQRT_PRICE_LIMIT_X96 = 0x1000276AD
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Function selectors (ABI)
+// ─────────────────────────────────────────────────────────────────────────────
+#define constant TRANSFER_SIG      = 0xa9059cbb00000000000000000000000000000000000000000000000000000000
+#define constant TRANSFER_FROM_SIG = 0x23b872dd00000000000000000000000000000000000000000000000000000000
+#define constant V2_SWAP_SIG       = 0x022c0d9f00000000000000000000000000000000000000000000000000000000
+#define constant V3_SWAP_SIG       = 0x128acb0800000000000000000000000000000000000000000000000000000000
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN — JUMPDEST dispatch
+// ─────────────────────────────────────────────────────────────────────────────
+
+#define macro MAIN() = takes (0) returns (0) {
+    push0
+    calldataload
+    push0
+    byte
+    jump
+
+// 0x05
+v2_backrun0_gate:
+    v2_backrun0 jump
+
+// 0x0A
+v2_frontrun0_gate:
+    v2_frontrun0 jump
+
+// 0x0F
+v2_backrun1_gate:
+    v2_backrun1 jump
+
+// 0x14
+v2_frontrun1_gate:
+    v2_frontrun1 jump
+
+// 0x19
+v3_backrun0_gate:
+    v3_backrun0 jump
+
+// 0x1E
+v3_frontrun0_gate:
+    v3_frontrun0 jump
+
+// 0x23
+v3_backrun1_gate:
+    v3_backrun1 jump
+
+// 0x28
+v3_frontrun1_gate:
+    v3_frontrun1 jump
+
+// 0x2D
+recover_weth_gate:
+    recover_weth jump
+
+// 0x32
+recover_eth_gate:
+    recover_eth jump
+
+// 0x37
+seppuku_gate:
+    seppuku jump
+
+// Padding: fill bytecode positions up to 0xFA for V3 callback JUMPDEST.
+// 0xFA == first byte of uniswapV3SwapCallback selector (0xfa461e33).
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop stop stop stop stop stop
+stop stop stop stop stop stop stop stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UniswapV3SwapCallback  (JUMPDEST must be at 0xFA)
+// Calldata: int256 amount0Delta, int256 amount1Delta, bytes data
+// data layout: [isZeroForOne:1][tokenIn:20][poolKeyHash:32]
+// ─────────────────────────────────────────────────────────────────────────────
+uniswap_v3_callback:
+    // Validate msg.sender == computed pool address
+    0x99 calldataload                               // [pool_key_hash]
+
+    __RIGHTPAD(0xFF) 0x00 mstore                    // mstore(ff, 0)
+    [FACTORY]        chainid mstore                 // mstore(FACTORY, 1)
+    0x15             mstore                         // mstore(poolKeyHash, 21)
+    [PAIR_INIT_CODE_HASH] 0x35 mstore              // mstore(PAIR_HASH, 51)
+
+    0x55 0x00 sha3                                  // [keccak_result]
+    0x000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+    and                                             // [pool_addr]
+    caller eq iszero gtfo jumpi                     // caller != pool → revert
+
+    // Setup for token.transfer(pool, amount)
+    push0 push0
+    0x44
+    push0
+    push0
+
+    // Extract tokenIn address from callback data at offset 0x84
+    0x00ffffffffffffffffffffffffffffffffffffffff0000000000000000000000
+    0x84 calldataload and 0x58 shr                  // [token_in]
+
+    // Extract isZeroForOne flag
+    0x84 calldataload 0xf8 shr                      // [isZeroForOne, token_in]
+    isZeroForOne_cb jumpi
+
+    // isZeroForOne = false → owe token1 (amount1Delta)
+    [TRANSFER_SIG] push0 mstore
+    caller 0x04 mstore
+    0x24 calldataload 0x24 mstore                   // amount1Delta
+    gas call iszero gtfo jumpi
+    stop
+
+isZeroForOne_cb:
+    // isZeroForOne = true → owe token0 (amount0Delta)
+    [TRANSFER_SIG] push0 mstore
+    caller 0x04 mstore
+    0x04 calldataload 0x24 mstore                   // amount0Delta
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V3 frontrun1 — WETH is token1 (input, zeroForOne=false)
+// Calldata: [JUMPDEST:1][pair:20][poolKeyHash:32]
+// tx.value = weth_amount / 100_000
+// ─────────────────────────────────────────────────────────────────────────────
+v3_frontrun1:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xf9
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    [V3_SWAP_SIG] 0x00 mstore
+    address       0x04 mstore
+    // zeroForOne = false → slot 0x24 stays 0 (memory is zeroed)
+    0x0186a0 callvalue mul 0x44 mstore              // amountSpecified = callvalue * 100_000
+    [MAX_SQRT_PRICE_LIMIT_X96] 0x64 mstore
+    // callback data: abi.encodePacked(isZeroForOne=false, WETH, poolKeyHash)
+    0xa0 0x84 mstore
+    0x35 0xa4 mstore
+    [WETH] 0x58 shl 0xc4 mstore                     // isZeroForOne(0) | WETH
+    0x15 calldataload 0xd9 mstore                   // poolKeyHash
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V3 frontrun0 — WETH is token0 (input, zeroForOne=true)
+// Calldata: [JUMPDEST:1][pair:20][poolKeyHash:32]
+// ─────────────────────────────────────────────────────────────────────────────
+v3_frontrun0:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xf9
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    [V3_SWAP_SIG] 0x00 mstore
+    address       0x04 mstore
+    0x01          0x24 mstore                       // zeroForOne = true
+    0x0186a0 callvalue mul 0x44 mstore
+    [MIN_SQRT_PRICE_LIMIT_X96] 0x64 mstore
+    0xa0 0x84 mstore
+    0x35 0xa4 mstore
+    // isZeroForOne=true flag merged into high bit of WETH addr slot
+    0x0100000000000000000000000000000000000000000000000000000000000000
+    [WETH] 0x58 shl add 0xc4 mstore
+    0x15 calldataload 0xd9 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V3 backrun1 — WETH is token1 (output, zeroForOne=true)
+// Calldata: [JUMPDEST:1][pair:20][tokenIn:20][poolKeyHash:32][encodedAmountIn:5]
+// ─────────────────────────────────────────────────────────────────────────────
+v3_backrun1:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xf9
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    [V3_SWAP_SIG] 0x00 mstore
+    address       0x04 mstore
+    0x01          0x24 mstore                       // zeroForOne = true
+
+    // 5-byte encoded amountIn at calldata offset 0x49
+    0x49 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    [MIN_SQRT_PRICE_LIMIT_X96] 0x64 mstore
+    0xa0 0x84 mstore
+    0x35 0xa4 mstore
+    // isZeroForOne=true, tokenIn from calldata[0x15..0x29]
+    0x0100000000000000000000000000000000000000000000000000000000000000
+    0x15 calldataload 0x60 shr 0x58 shl
+    add 0xc4 mstore
+    0x29 calldataload 0xd9 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V3 backrun0 — WETH is token0 (output, zeroForOne=false)
+// Calldata: [JUMPDEST:1][pair:20][tokenIn:20][poolKeyHash:32][encodedAmountIn:5]
+// ─────────────────────────────────────────────────────────────────────────────
+v3_backrun0:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xf9
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    [V3_SWAP_SIG] 0x00 mstore
+    address       0x04 mstore
+    // zeroForOne = false → 0x24 stays zero
+
+    0x49 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    [MAX_SQRT_PRICE_LIMIT_X96] 0x64 mstore
+    0xa0 0x84 mstore
+    0x35 0xa4 mstore
+    // isZeroForOne=false, tokenIn from calldata[0x15..0x29]
+    0x15 calldataload 0x60 shr 0x58 shl
+    0xc4 mstore
+    0x29 calldataload 0xd9 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 backrun0 — WETH is token0 (output)
+// Calldata: [JUMPDEST:1][pair:20][tokenIn:20][encodedAmountIn:5]
+// tx.value = weth_amount_out / 100_000
+// ─────────────────────────────────────────────────────────────────────────────
+v2_backrun0:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xA4
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    // Transfer tokenIn → pair first
+    push0 push0
+    [TRANSFER_SIG] push0 mstore
+    dup3 0x04 mstore                                // to = pair
+    // 5-byte encoded amountIn at offset 0x29
+    0x29 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    0x44 push0 push0
+    0x15 calldataload 0x60 shr                      // [tokenIn]
+    gas call pop
+
+    // swap(wethOut, 0, address(this), "")
+    [V2_SWAP_SIG]         0x00 mstore
+    0x0186a0 callvalue mul 0x04 mstore              // amount0Out = WETH
+    0x00                  0x24 mstore
+    address               0x44 mstore
+    0x80                  0x64 mstore               // data offset
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 backrun1 — WETH is token1 (output)
+// Calldata: [JUMPDEST:1][pair:20][tokenIn:20][encodedAmountIn:5]
+// ─────────────────────────────────────────────────────────────────────────────
+v2_backrun1:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xA4
+    push0
+    push0
+    chainid calldataload 0x60 shr
+
+    push0 push0
+    [TRANSFER_SIG] push0 mstore
+    dup3 0x04 mstore
+    0x29 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    0x44 push0 push0
+    0x15 calldataload 0x60 shr
+    gas call pop
+
+    // swap(0, wethOut, address(this), "")
+    [V2_SWAP_SIG]         0x00 mstore
+    0x00                  0x04 mstore
+    0x0186a0 callvalue mul 0x24 mstore              // amount1Out = WETH
+    address               0x44 mstore
+    0x80                  0x64 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 frontrun0 — WETH is token0 (input)
+// Calldata: [JUMPDEST:1][pair:20][encodedTokenOut:5]
+// tx.value = weth_amount_in / 100_000
+// ─────────────────────────────────────────────────────────────────────────────
+v2_frontrun0:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xA4
+    push0
+    push0
+    chainid calldataload 0x60 shr                   // [pair]
+
+    push0 push0
+    // transferFrom(bot, pair, weth_amount)
+    [TRANSFER_FROM_SIG] push0 mstore
+    address 0x04 mstore                             // from = address(this)
+    dup3    0x24 mstore                             // to   = pair
+    0x0186a0 callvalue mul 0x44 mstore              // amount
+
+    0x64 push0 push0
+    [WETH]
+    gas call pop
+
+    // swap(0, tokenOut, address(this), "")
+    [V2_SWAP_SIG] 0x00 mstore
+    0x00          0x04 mstore
+    0x00          0x24 mstore                       // clear slot
+
+    // 5-byte encoded tokenOut at calldata offset 0x15
+    0x15 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    address 0x44 mstore
+    0x80    0x64 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2 frontrun1 — WETH is token1 (input)
+// Calldata: [JUMPDEST:1][pair:20][encodedTokenOut:5]
+// ─────────────────────────────────────────────────────────────────────────────
+v2_frontrun1:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0
+    0xA4
+    push0
+    push0
+    chainid calldataload 0x60 shr
+
+    push0 push0
+    [TRANSFER_FROM_SIG] push0 mstore
+    address 0x04 mstore
+    dup3    0x24 mstore
+    0x0186a0 callvalue mul 0x44 mstore
+
+    0x64 push0 push0
+    [WETH]
+    gas call pop
+
+    // swap(tokenOut, 0, address(this), "")
+    [V2_SWAP_SIG] 0x00 mstore
+    0x00          0x04 mstore                       // clear slot
+
+    // 5-byte encoded tokenOut at calldata offset 0x15
+    0x15 calldataload dup1
+    0x08 shl swap1
+    0x00 byte mstore
+
+    0x00    0x24 mstore
+    address 0x44 mstore
+    0x80    0x64 mstore
+
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Utility: recover WETH to owner
+// Calldata: [JUMPDEST:1][amountOut:32]
+// ─────────────────────────────────────────────────────────────────────────────
+recover_weth:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    [TRANSFER_SIG]  msize mstore
+    caller          0x04  mstore
+    chainid calldataload  0x24 mstore               // amountOut
+
+    push0 push0
+    0x44
+    push0
+    push0
+    [WETH]
+    gas call iszero gtfo jumpi
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Utility: recover ETH to owner
+// ─────────────────────────────────────────────────────────────────────────────
+recover_eth:
+    [OWNER] caller eq iszero gtfo jumpi
+
+    push0 push0 push0 push0
+    selfbalance
+    caller
+    gas call
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Emergency: self-destruct — sends all ETH to caller
+// ─────────────────────────────────────────────────────────────────────────────
+seppuku:
+    [OWNER] caller eq iszero gtfo jumpi
+    caller selfdestruct
+    stop
+
+// ─────────────────────────────────────────────────────────────────────────────
+// gtfo — revert with (3,3)  "wagmi revert"
+// ─────────────────────────────────────────────────────────────────────────────
+gtfo:
+    0x03 dup1 revert
+}

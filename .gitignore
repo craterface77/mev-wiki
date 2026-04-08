@@ -1,0 +1,7 @@
+.DS_Store
+mev-bot/target/
+mev-bot/.env
+mev-bot/contracts/cache/
+mev-bot/contracts/out/
+mev-bot/contracts/lib/
+mev-bot/contracts/src/__TEMP__*
