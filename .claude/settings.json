@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git clone *)",
+      "Bash(wait)",
+      "Bash([ -d \"$dir/.git\" ])",
+      "Bash(rm -rf __TRACKED_VAR__/.git)",
+      "Bash(git -C /Users/oleh/Desktop/mev-wiki pull --rebase origin mev-bot)"
+    ]
+  }
+}

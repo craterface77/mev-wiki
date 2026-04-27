@@ -1,0 +1,40 @@
+name: Contract Dataset Test
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: 3
+
+# https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#concurrency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dataset-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - run: echo "NODE_VERSION=`node --version`" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-${{ env.NODE_VERSION }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn test --grep ::dataset
+        env:
+          ENABLE_DATASET_TEST: 1
+      - name: Include dataset summary
+        run: cat dist/dataset-summary.md >> $GITHUB_STEP_SUMMARY
+      - name: Add dataset summary PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          recreate: true
+          path: dist/dataset-summary.md

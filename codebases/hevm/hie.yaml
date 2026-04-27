@@ -1,0 +1,12 @@
+cradle:
+  cabal:
+    - path: "./src"
+      component: "lib:hevm"
+    - path: "./bench"
+      component: "bench"
+    - path: "./cli"
+      component: "exe:hevm"
+    - path: "./test/test.hs"
+      component: "test:test"
+    - path: "./test/"
+      component: "lib:test-utils"

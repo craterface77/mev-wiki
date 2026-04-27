@@ -1,0 +1,28 @@
+[profile.default]
+solc_version = '0.8.24'
+evm_version = 'cancun'
+optimizer = true
+optimizer_runs = 200 # Default amount
+ffi = true
+fuzz_runs = 1_000
+libs = ["lib", "node_modules"]
+remappings = [
+  "forge-std=lib/forge-std/src/",
+  "foundry-huff=lib/foundry-huff/src/",
+  "@openzeppelin=node_modules/@openzeppelin/",
+  "solady=node_modules/solady/",
+]
+
+bytecode_hash = "none"
+cbor_metadata = false
+
+ignored_error_codes = [
+  "license",
+  "code-size",
+  "init-code-size",
+  "transient-storage",
+  3628,
+]
+
+[profile.release]
+optimizer_runs = 10_000_000

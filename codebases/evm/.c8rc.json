@@ -1,0 +1,11 @@
+{
+    "reporter": ["lcov", "text"],
+    "lines": "85",
+    "branches": "82",
+    "statements": "85",
+    "exclude": [
+        ".solc/soljson-v*.js",
+        "dist/test/",
+        "test/scripts/solc.mjs"
+    ]
+}

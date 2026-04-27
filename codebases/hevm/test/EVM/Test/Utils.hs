@@ -1,0 +1,109 @@
+module EVM.Test.Utils where
+
+import Data.List (isInfixOf)
+import GHC.IO.Exception (IOErrorType(..))
+import GHC.Natural
+import Paths_hevm qualified as Paths
+import System.Directory
+import System.FilePath ((</>))
+import System.IO.Temp
+import System.Process
+import System.Exit
+import System.IO.Error (mkIOError)
+
+import EVM.Dapp (dappInfo, emptyDapp, TestMethodFilter)
+import EVM.Solidity
+import EVM.Solvers
+import EVM.UnitTest
+import EVM.SymExec qualified as SymExec
+import Control.Monad.IO.Unlift
+import Control.Monad.Catch (MonadMask)
+import EVM.Effects
+import Data.Maybe (fromMaybe)
+import EVM.Types (internalError)
+import System.Environment (lookupEnv)
+import EVM.Fetch (RpcInfo, noRpc)
+import EVM.Fetch qualified as Fetch
+
+-- Returns tuple of (No cex, No warnings)
+runForgeTestCustom
+  :: (MonadMask m, App m)
+  => FilePath -> TestMethodFilter -> Maybe Natural -> Maybe Integer -> Bool -> RpcInfo -> m (Bool, Bool)
+runForgeTestCustom testFile methodFilter timeout maxIter ffiAllowed rpcinfo = do
+  withSystemTempDirectory "dapp-test" $ \root -> do
+    compileWithForge root testFile >>= \case
+      Left e -> liftIO $ do
+        putStrLn e
+        internalError $ "Error compiling test file " <> show testFile <> " in directory "
+          <> show root
+      Right buildOut -> do
+        withSolvers Bitwuzla 3 timeout defMemLimit $ \solvers -> do
+          opts <- testOpts solvers root (Just buildOut) methodFilter maxIter ffiAllowed rpcinfo
+          unitTest opts buildOut
+
+-- Returns tuple of (No cex, No warnings)
+runForgeTest
+  :: (MonadMask m, App m)
+  => FilePath -> TestMethodFilter -> m (Bool, Bool)
+runForgeTest testFile methodFilter = runForgeTestCustom testFile methodFilter Nothing Nothing False noRpc
+
+testOpts :: forall m . App m => SolverGroup -> FilePath -> Maybe BuildOutput -> TestMethodFilter -> Maybe Integer -> Bool -> RpcInfo -> m (UnitTestOptions)
+testOpts solvers root buildOutput methodFilter maxIter allowFFI rpcinfo = do
+  let srcInfo = maybe emptyDapp (dappInfo root) buildOutput
+  sess <- Fetch.mkSessionWithoutCache
+  params <- paramsFromRpc rpcinfo sess
+
+  pure UnitTestOptions
+    { solvers = solvers
+    , sess = sess
+    , rpcInfo = rpcinfo
+    , maxIter = maxIter
+    , askSmtIters = 1
+    , smtTimeout = Nothing
+    , methodFilter = methodFilter
+    , testParams = params
+    , dapp = srcInfo
+    , ffiAllowed = allowFFI
+    , checkFailBit = False
+    , loopHeuristic = SymExec.StackBased
+    }
+
+processFailedException :: String -> String -> [String] -> Int -> IO a
+processFailedException fun cmd args exit_code =
+      ioError (mkIOError OtherError (fun ++ ": " ++ cmd ++
+                                     concatMap ((' ':) . show) args ++
+                                     " (exit " ++ show exit_code ++ ")")
+                                 Nothing Nothing)
+
+callProcessCwd :: FilePath -> [String] -> FilePath -> IO ()
+callProcessCwd cmd args cwd = do
+    exit_code <- withCreateProcess (proc cmd args) { cwd = Just cwd, delegate_ctlc = True } $ \_ _ _ p ->
+                 waitForProcess p
+    case exit_code of
+      ExitSuccess   -> pure ()
+      ExitFailure r -> processFailedException "callProcess" cmd args r
+
+compileWithForge :: App m => FilePath -> FilePath -> m (Either String BuildOutput)
+compileWithForge root src = do
+  (res, out, err) <- liftIO $ do
+    createDirectory (root </> "src")
+    writeFile (root </> "foundry.toml") "[profile.default]\nevm_version = \"Osaka\"\nast = true\n"
+    writeFile (root </> "src" </> "unit-tests.t.sol") =<< readFile =<< Paths.getDataFileName src
+    initLib (root </> "lib" </> "tokens") ("test" </> "contracts" </> "lib" </> "erc20.sol") "erc20.sol"
+    initStdForgeDir (root </> "lib" </> "forge-std")
+    readProcessWithExitCode "forge" ["build", "--root", root] ""
+  case res of
+    ExitFailure _ -> pure . Left $ "compilation failed: " <> "exit code: " <> show res <> "\n\nstdout:\n" <> out <> "\n\nstderr:\n" <> err
+    ExitSuccess -> readFilteredBuildOutput root (\path -> "unit-tests.t.sol" `Data.List.isInfixOf` path) Foundry
+  where
+    initStdForgeDir :: FilePath -> IO ()
+    initStdForgeDir tld = do
+      createDirectoryIfMissing True tld
+      forgeStdRepo <- liftIO $ fromMaybe (internalError "cannot find forge-std repo") <$> (lookupEnv "HEVM_FORGE_STD_REPO")
+      callProcess "mkdir" ["-p", tld]
+      callProcess "cp" ["-r", forgeStdRepo </> "src", tld </> "src"]
+    initLib :: FilePath -> FilePath -> FilePath -> IO ()
+    initLib tld srcFile dstFile = do
+      createDirectoryIfMissing True (tld </> "src")
+      writeFile (tld </> "src" </> dstFile) =<< readFile =<< Paths.getDataFileName srcFile
+      pure ()

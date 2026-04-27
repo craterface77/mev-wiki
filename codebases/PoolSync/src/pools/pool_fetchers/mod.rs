@@ -1,0 +1,34 @@
+pub use aerodrome::AerodromeFetcher;
+pub use aerodrome::SlipstreamFetcher;
+pub use alien_base::AlienBaseV2Fetcher;
+pub use alien_base::AlienBaseV3Fetcher;
+pub use balancer::BalancerV2Fetcher;
+pub use base_swap::BaseSwapV2Fetcher;
+pub use base_swap::BaseSwapV3Fetcher;
+pub use curve::CurveTwoCryptoFetcher;
+pub use curve::CurveTriCryptoFetcher;
+pub use maverick::MaverickV1Fetcher;
+pub use maverick::MaverickV2Fetcher;
+pub use pancake_swap::PancakeSwapV2Fetcher;
+pub use pancake_swap::PancakeSwapV3Fetcher;
+pub use sushiswap::SushiSwapV2Fetcher;
+pub use sushiswap::SushiSwapV3Fetcher;
+pub use uniswap::UniswapV2Fetcher;
+pub use uniswap::UniswapV3Fetcher;
+pub use swap_based::SwapBasedV2Fetcher;
+pub use swap_based::SwapBasedV3Fetcher;
+pub use dackie_swap::DackieSwapV2Fetcher;
+pub use dackie_swap::DackieSwapV3Fetcher;
+
+
+mod aerodrome;
+mod alien_base;
+mod dackie_swap;
+mod swap_based;
+mod balancer;
+mod base_swap;
+mod curve;
+mod maverick;
+mod pancake_swap;
+mod sushiswap;
+mod uniswap;

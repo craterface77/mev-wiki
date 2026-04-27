@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "app",
+    "crates/bindings",
+]
+resolver = "2"
+
+[workspace.dependencies]
+bindings = { path = "crates/bindings" }

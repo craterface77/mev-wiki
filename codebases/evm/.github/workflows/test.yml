@@ -1,0 +1,92 @@
+name: Main Test
+
+on:
+  # We want to trigger these jobs in every branch but not tags
+  push:
+    branches: []
+
+# `FORCE_COLOR` is used by `chalk`, which is used internally by `mocha`.
+# https://github.com/chalk/chalk#supportscolor
+# https://github.com/orgs/community/discussions/26944#discussioncomment-3254075
+env:
+  FORCE_COLOR: 3
+
+jobs:
+  check-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "NODE_VERSION=`node --version`" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-${{ env.NODE_VERSION }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn compile
+      - run: yarn make:help
+      - run: git --no-pager diff --exit-code README.md
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "NODE_VERSION=`node --version`" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-${{ env.NODE_VERSION }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn compile
+      - run: yarn lint
+      - run: yarn bundle
+
+  test:
+    strategy:
+      # Runs all node versions using the same `os` in parallel
+      max-parallel: 3
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        # https://nodejs.dev/en/about/releases/
+        node: [18, 20, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/cache@v4
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-${{ matrix.node }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn test
+        env:
+          ENABLE_4BYTE_TEST: 1
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "NODE_VERSION=`node --version`" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: '**/node_modules'
+          key: ${{ runner.os }}-${{ env.NODE_VERSION }}-modules-${{ hashFiles('**/yarn.lock') }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn coverage
+        env:
+          ENABLE_4BYTE_TEST: 1
+      - run: yarn --silent c8 report > ./coverage/coverage.txt
+        env:
+          FORCE_COLOR: 0
+      - uses: fingerprintjs/action-coverage-report-md@v2
+        id: coverage
+      - name: Add coverage report to the job summary
+        run: |
+          echo "## Code Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.coverage.outputs.markdownReport }}" >> $GITHUB_STEP_SUMMARY
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: acuarica/evm

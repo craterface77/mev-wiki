@@ -1,0 +1,50 @@
+[package]
+edition = "2021"
+name = "univ3-revm-arbitrage"
+publish = false
+version = "0.0.0"
+rust-version = "1.83.0"
+
+[dependencies]
+alloy = { version = "0.14", features = ["full", "node-bindings"] }
+anyhow = "1.0.89"
+cacache = { version = "13.0.0", default-features = false, features = [
+  "tokio-runtime",
+  "mmap",
+] }
+env_logger = "0.11.5"
+
+revm = { version = "23.0.0", features = ["alloydb"] }
+tokio = { version = "1.40.0", features = ["full"] }
+
+[[bin]]
+name = "eth_call_one"
+path = "src/eth_call_one.rs"
+
+[[bin]]
+name = "eth_call"
+path = "src/eth_call.rs"
+
+[[bin]]
+name = "anvil"
+path = "src/anvil.rs"
+
+[[bin]]
+name = "revm"
+path = "src/revm.rs"
+
+[[bin]]
+name = "revm_cached"
+path = "src/revm_cached.rs"
+
+[[bin]]
+name = "revm_quoter"
+path = "src/revm_quoter.rs"
+
+[[bin]]
+name = "revm_validate"
+path = "src/revm_validate.rs"
+
+[[bin]]
+name = "revm_arbitrage"
+path = "src/revm_arbitrage.rs"

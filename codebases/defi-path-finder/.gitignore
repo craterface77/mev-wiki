@@ -1,0 +1,15 @@
+dist/
+venv/
+build/
+__pycache__/
+
+defi_path_finder.egg-info/
+
+.idea/
+.vscode/
+
+*.pyc
+*.zip
+*.pkl
+
+.DS_Store

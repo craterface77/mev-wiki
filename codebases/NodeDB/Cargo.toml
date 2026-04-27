@@ -1,0 +1,61 @@
+[package]
+name = "node-db"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "swap"
+path = "example/swap.rs"
+
+[[bin]]
+name = "swap-async"
+path = "example/swap_async.rs"
+
+[[bin]]
+name = "quote"
+path = "example/quote.rs"
+
+[[bin]]
+name = "custom-slot"
+path = "example/custom_slot.rs"
+
+[[bin]]
+name = "custom-account"
+path = "example/custom_account.rs"
+
+[[bin]]
+name = "approval"
+path = "example/approval.rs"
+
+[[bin]]
+name = "approval-async"
+path = "example/approval_async.rs"
+
+[[bin]]
+name = "get-balance-slot"
+path = "example/get_balance_slot.rs"
+
+[dependencies]
+anyhow = "1.0.97"
+eyre = "0.6.12"
+
+reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v1.3.12", default-features = false }
+reth-node-api = { git = "https://github.com/paradigmxyz/reth", tag = "v1.3.12", default-features = false }
+reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v1.3.12", default-features = false }
+reth-chainspec = { git = "https://github.com/paradigmxyz/reth", tag = "v1.3.12", default-features = false }
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v1.3.12", default-features = false }
+
+alloy-primitives = "1.1.2"
+alloy-sol-types = { version = "1.1.2", features = ["json"] }
+alloy-contract = "1.0.6"
+
+
+parking_lot = "0.12.3"
+tokio = { version = "1.44.1", features = ["full"] }
+futures = "0.3.31"
+dotenv = "0.15.0"
+env_logger = "0.11.8"
+log = "0.4.27"
+revm = { version = "22.0.1", features = ["alloydb"] }
+foldhash = "0.1.5"
+async-trait = "0.1.88"
